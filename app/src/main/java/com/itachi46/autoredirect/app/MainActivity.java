@@ -1,45 +1,98 @@
 package com.itachi46.autoredirect.app;
 
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.renderscript.RenderScript;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.app.TaskStackBuilder;
 import android.support.v7.app.ActionBarActivity;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.Switch;
+import android.widget.TextView;
 import android.widget.Toast;
 
 
 public class MainActivity extends ActionBarActivity {
 
+    public static final String TAG = "Wahoo";
     private Switch forwardToggle;
+    private EditText forwardNumber;
+    private boolean forwardingChangeDetected;
+    private SharedPreferences sharedPrefs;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        sharedPrefs = this.getSharedPreferences(getString(R.string.preference_key_file), Context.MODE_PRIVATE);
+
+        addCallForwardListener();
+        addSwitchListener();
+        addEditTextListener();
+
+        forwardingChangeDetected = false;
+        String savedForwardingNumber = sharedPrefs.getString(getString(R.string.saved_forwarding_number), "");
+        forwardNumber.setText(savedForwardingNumber);
+
+
+    }
+
+    private void addCallForwardListener() {
         //read status of forwarding
         TelephonyManager manager = (TelephonyManager)
                 this.getSystemService(TELEPHONY_SERVICE);
         manager.listen(new MyPhoneStateListener(),
                 PhoneStateListener.LISTEN_CALL_FORWARDING_INDICATOR);
+    }
 
+    private void addSwitchListener() {
         //add set on value change listener for the switch
         forwardToggle = (Switch) findViewById(R.id.forward_toggle);
         forwardToggle.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton compoundButton, boolean b) {
-                forwardCalls(compoundButton);
+                Log.v(TAG, "check changed!");
+                if (forwardingChangeDetected) {
+                    Log.v(TAG, "not doing a thing");
+                    forwardingChangeDetected = false;
+                } else {
+
+                    forwardCalls(compoundButton);
+                }
             }
         });
     }
 
+    private void addEditTextListener() {
+        // add editText's on action listener.
+        forwardNumber = (EditText) findViewById(R.id.forward_number);
+        forwardNumber.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override
+            public boolean onEditorAction(TextView textView, int i, KeyEvent keyEvent) {
+                SharedPreferences.Editor editor = sharedPrefs.edit();
+//                editor.putInt(getString(R.string.saved_high_score), newHighScore);
+                editor.putString(getString(R.string.saved_forwarding_number), forwardNumber.getText().toString());
+                editor.apply();
+                return false;
+            }
+
+        });
+
+    }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -63,25 +116,60 @@ public class MainActivity extends ActionBarActivity {
                 break;
         }
 
-        return true;
 
-//        return super.onOptionsItemSelected(item);
+        return super.onOptionsItemSelected(item);
     }
 
     public void forwardCalls(View view) {
+        Log.v(TAG, "doing something");
         Switch forwardSwitch;
         forwardSwitch = (Switch) view;
         boolean on = forwardSwitch.isChecked();
         if (!on) {
+            forwardSwitch.setChecked(true); // preserve previous state and let call forwarding listener change the value.
             cancelAllForward();
-            Toast.makeText(this, "off", Toast.LENGTH_SHORT).show();
         } else {
-            EditText editBox = (EditText) findViewById(R.id.forward_number);
-            String phoneNumber = editBox.getText().toString();
-            if (phoneNumber.isEmpty() || !phoneNumber.startsWith("+")) {
-                forwardSwitch.setChecked(false);
+            Log.v(TAG, "probs not even here.");
+            forwardSwitch.setChecked(false);// this is set to false so that the toggle only stays at on if the forwarding was successful.
+            String phoneNumber = forwardNumber.getText().toString();
+            if (phoneNumber.isEmpty() || !phoneNumber.startsWith("+") || phoneNumber.length() < 8) {
+                Toast.makeText(this, R.string.Invalid_number, Toast.LENGTH_SHORT).show();
+
             } else {
                 forwardAll(phoneNumber);
+                Intent blah = new Intent()
+                NotificationCompat.Builder mBuilder =
+                        new NotificationCompat.Builder(this)
+                                .setSmallIcon(R.drawable.ic_launcher)
+                                .setContentTitle("Call Forwarding Active")
+                                .setContentText("All calls forwarded to " + phoneNumber)
+                                .addAction(R.drawable.ic_launcher,"Snooze", null)
+                                .addAction(R.drawable.ic_launcher, "Cancel", null)
+                                .setAutoCancel(true)
+                                .setPriority(NotificationCompat.PRIORITY_MAX);
+
+// Creates an explicit intent for an Activity in your app
+                Intent resultIntent = new Intent(this, MainActivity.class);
+
+// The stack builder object will contain an artificial back stack for the
+// started Activity.
+// This ensures that navigating backward from the Activity leads out of
+// your application to the Home screen.
+                TaskStackBuilder stackBuilder = TaskStackBuilder.create(this);
+// Adds the back stack for the Intent (but not the Intent itself)
+                stackBuilder.addParentStack(MainActivity.class);
+// Adds the Intent that starts the Activity to the top of the stack
+                stackBuilder.addNextIntent(resultIntent);
+                PendingIntent resultPendingIntent =
+                        stackBuilder.getPendingIntent(
+                                0,
+                                PendingIntent.FLAG_UPDATE_CURRENT
+                        );
+                mBuilder.setContentIntent(resultPendingIntent);
+                NotificationManager mNotificationManager =
+                        (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+// mId allows you to update the notification later on.
+                mNotificationManager.notify(0, mBuilder.build());
             }
         }
     }
@@ -108,8 +196,14 @@ public class MainActivity extends ActionBarActivity {
     class MyPhoneStateListener extends PhoneStateListener {
         @Override
         public void onCallForwardingIndicatorChanged(boolean cfi) {
+            Log.v(TAG, "call forwarding indicator changed.");
             super.onCallForwardingIndicatorChanged(cfi);
-            forwardToggle.setChecked(cfi);
+            if (forwardToggle.isChecked() != cfi) {
+                forwardingChangeDetected = true;
+                forwardToggle.setChecked(cfi);
+            }
+
+
         }
 
     }
