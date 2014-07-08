@@ -137,7 +137,6 @@ public class MainActivity extends ActionBarActivity {
 
             } else {
                 forwardAll(phoneNumber);
-                Intent blah = new Intent()
                 NotificationCompat.Builder mBuilder =
                         new NotificationCompat.Builder(this)
                                 .setSmallIcon(R.drawable.ic_launcher)
