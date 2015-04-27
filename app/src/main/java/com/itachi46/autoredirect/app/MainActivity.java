@@ -7,10 +7,9 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
-import android.renderscript.RenderScript;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.TaskStackBuilder;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.AppCompatActivity;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
 import android.util.Log;
@@ -25,7 +24,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 
-public class MainActivity extends ActionBarActivity {
+public class MainActivity extends AppCompatActivity {
 
     public static final String TAG = "Wahoo";
     private Switch forwardToggle;
@@ -36,9 +35,11 @@ public class MainActivity extends ActionBarActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        Log.v(TAG, "oncreate!");
         setContentView(R.layout.activity_main);
 
-        sharedPrefs = this.getSharedPreferences(getString(R.string.preference_key_file), Context.MODE_PRIVATE);
+        sharedPrefs = getSharedPreferences(getString(R.string.preference_key_file), Context.MODE_PRIVATE);
 
         addCallForwardListener();
         addSwitchListener();
@@ -49,6 +50,18 @@ public class MainActivity extends ActionBarActivity {
         forwardNumber.setText(savedForwardingNumber);
 
 
+    }
+
+    @Override
+    protected void onPause(){
+        super.onPause();
+        savePreferences();
+    }
+
+    @Override
+    protected void onStop(){
+        super.onStop();
+        savePreferences();
     }
 
     private void addCallForwardListener() {
@@ -65,12 +78,10 @@ public class MainActivity extends ActionBarActivity {
         forwardToggle.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton compoundButton, boolean b) {
-                Log.v(TAG, "check changed!");
+                savePreferences();
                 if (forwardingChangeDetected) {
-                    Log.v(TAG, "not doing a thing");
                     forwardingChangeDetected = false;
                 } else {
-
                     forwardCalls(compoundButton);
                 }
             }
@@ -80,13 +91,13 @@ public class MainActivity extends ActionBarActivity {
     private void addEditTextListener() {
         // add editText's on action listener.
         forwardNumber = (EditText) findViewById(R.id.forward_number);
+
         forwardNumber.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
             public boolean onEditorAction(TextView textView, int i, KeyEvent keyEvent) {
                 SharedPreferences.Editor editor = sharedPrefs.edit();
-//                editor.putInt(getString(R.string.saved_high_score), newHighScore);
                 editor.putString(getString(R.string.saved_forwarding_number), forwardNumber.getText().toString());
-                editor.apply();
+                editor.commit();
                 return false;
             }
 
@@ -120,8 +131,15 @@ public class MainActivity extends ActionBarActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    public void forwardCalls(View view) {
-        Log.v(TAG, "doing something");
+    private void savePreferences(){
+        forwardNumber = (EditText) findViewById(R.id.forward_number);
+        SharedPreferences.Editor editor = sharedPrefs.edit();
+        editor.putString(getString(R.string.saved_forwarding_number), forwardNumber.getText().toString());
+        editor.apply();
+
+    }
+
+    private void forwardCalls(View view) {
         Switch forwardSwitch;
         forwardSwitch = (Switch) view;
         boolean on = forwardSwitch.isChecked();
@@ -129,53 +147,60 @@ public class MainActivity extends ActionBarActivity {
             forwardSwitch.setChecked(true); // preserve previous state and let call forwarding listener change the value.
             cancelAllForward();
         } else {
-            Log.v(TAG, "probs not even here.");
             forwardSwitch.setChecked(false);// this is set to false so that the toggle only stays at on if the forwarding was successful.
             String phoneNumber = forwardNumber.getText().toString();
             if (phoneNumber.isEmpty() || !phoneNumber.startsWith("+") || phoneNumber.length() < 8) {
                 Toast.makeText(this, R.string.Invalid_number, Toast.LENGTH_SHORT).show();
-
-            } else {
+            }
+            else {
                 forwardAll(phoneNumber);
-                NotificationCompat.Builder mBuilder =
-                        new NotificationCompat.Builder(this)
-                                .setSmallIcon(R.drawable.ic_launcher)
-                                .setContentTitle("Call Forwarding Active")
-                                .setContentText("All calls forwarded to " + phoneNumber)
-                                .addAction(R.drawable.ic_launcher,"Snooze", null)
-                                .addAction(R.drawable.ic_launcher, "Cancel", null)
-                                .setAutoCancel(true)
-                                .setPriority(NotificationCompat.PRIORITY_MAX);
+                createNotification(phoneNumber);
 
-// Creates an explicit intent for an Activity in your app
-                Intent resultIntent = new Intent(this, MainActivity.class);
-
-// The stack builder object will contain an artificial back stack for the
-// started Activity.
-// This ensures that navigating backward from the Activity leads out of
-// your application to the Home screen.
-                TaskStackBuilder stackBuilder = TaskStackBuilder.create(this);
-// Adds the back stack for the Intent (but not the Intent itself)
-                stackBuilder.addParentStack(MainActivity.class);
-// Adds the Intent that starts the Activity to the top of the stack
-                stackBuilder.addNextIntent(resultIntent);
-                PendingIntent resultPendingIntent =
-                        stackBuilder.getPendingIntent(
-                                0,
-                                PendingIntent.FLAG_UPDATE_CURRENT
-                        );
-                mBuilder.setContentIntent(resultPendingIntent);
-                NotificationManager mNotificationManager =
-                        (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-// mId allows you to update the notification later on.
-                mNotificationManager.notify(0, mBuilder.build());
             }
         }
     }
 
+    /**
+     * Creates the notification after a forward is made.
+     * @param phoneNumber the Number to forward to.
+     */
+    private void createNotification(String phoneNumber){
+
+        Intent cancelIntent = new Intent(this, CancelAllForwardReceiver.class);
+        PendingIntent pendingCancelIntent = PendingIntent.getBroadcast(this, 0, cancelIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder mBuilder =
+                new NotificationCompat.Builder(this)
+                        .setSmallIcon(R.drawable.ic_launcher)
+                        .setContentTitle("Call Forwarding Active")
+                        .setContentText("All calls forwarded to " + phoneNumber)
+                        .addAction(R.drawable.ic_launcher,"Snooze", null)
+                        .addAction(R.drawable.ic_launcher, "Cancel", pendingCancelIntent)
+                        .setAutoCancel(true)
+                        .setPriority(NotificationCompat.PRIORITY_MAX);
+
+        // Creates an explicit intent for an Activity in your app
+        Intent openActivityIntent = new Intent(this, MainActivity.class);
+
+        // The stack builder object will contain an artificial back stack for the
+        // started Activity.
+        // This ensures that navigating backward from the Activity leads out of
+        // your application to the Home screen.
+        TaskStackBuilder stackBuilder = TaskStackBuilder.create(this);
+        // Adds the back stack for the Intent (but not the Intent itself)
+        stackBuilder.addParentStack(MainActivity.class);
+        // Adds the Intent that starts the Activity to the top of the stack
+        stackBuilder.addNextIntent(openActivityIntent);
+        // 0  is the request code which is used to retrieve this particular intent again.
+        PendingIntent resultPendingIntent = stackBuilder.getPendingIntent(0,PendingIntent.FLAG_UPDATE_CURRENT);
+        mBuilder.setContentIntent(resultPendingIntent);
+        NotificationManager mNotificationManager =(NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        // mId allows you to update the notification later on.
+        mNotificationManager.notify(0, mBuilder.build());
+    }
+
     private void cancelAllForward() {
-        String disableAllForwardString;
-        disableAllForwardString = "#21#";
+        String disableAllForwardString = "#21#";
         Intent intentCallForward = new Intent(Intent.ACTION_CALL); // ACTION_CALL
         Uri uri = Uri.fromParts("tel", disableAllForwardString, "");
         intentCallForward.setData(uri);
@@ -195,7 +220,6 @@ public class MainActivity extends ActionBarActivity {
     class MyPhoneStateListener extends PhoneStateListener {
         @Override
         public void onCallForwardingIndicatorChanged(boolean cfi) {
-            Log.v(TAG, "call forwarding indicator changed.");
             super.onCallForwardingIndicatorChanged(cfi);
             if (forwardToggle.isChecked() != cfi) {
                 forwardingChangeDetected = true;
